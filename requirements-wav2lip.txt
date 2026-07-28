@@ -1,0 +1,12 @@
+# requirements-wav2lip.txt
+
+numpy>=1.23.5
+scipy>=1.10.1
+librosa>=0.8.1
+matplotlib>=3.5.3
+tqdm>=4.66.2
+ffmpeg-python>=0.2.0
+opencv-python>=4.5.5.64
+numba>=0.56.4
+# Install torch/torchvision/torchaudio separately:
+# pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
