@@ -66,35 +66,60 @@ def get_smoothened_boxes(boxes, T):
 	return boxes
 
 def face_detect(images):
+	det_imgs = []
+	scales = []
+	for img in images:
+		h, w = img.shape[:2]
+		scale = 1.0
+		if max(h, w) > 640:
+			scale = 640 / max(h, w)
+			det_img = cv2.resize(img, (int(w * scale), int(h * scale)))
+		else:
+			det_img = img
+		det_imgs.append(det_img)
+		scales.append(scale)
+
+	det_device = device
 	detector = face_detection.FaceAlignment(face_detection.LandmarksType._2D, 
-											flip_input=False, device=device)
+											flip_input=False, device=det_device)
 
 	batch_size = args.face_det_batch_size
 	
 	while 1:
 		predictions = []
 		try:
-			for i in tqdm(range(0, len(images), batch_size)):
-				predictions.extend(detector.get_detections_for_batch(np.array(images[i:i + batch_size])))
-		except RuntimeError:
-			if batch_size == 1: 
-				raise RuntimeError('Image too big to run face detection on GPU. Please use the --resize_factor argument')
-			batch_size //= 2
-			print('Recovering from OOM error; New batch size: {}'.format(batch_size))
+			for i in tqdm(range(0, len(det_imgs), batch_size)):
+				predictions.extend(detector.get_detections_for_batch(np.array(det_imgs[i:i + batch_size])))
+		except RuntimeError as e:
+			if batch_size <= 1:
+				if det_device == 'cuda':
+					print('Face detection on GPU failed: {}. Falling back to CPU.'.format(e))
+					del detector
+					torch.cuda.empty_cache()
+					det_device = 'cpu'
+					detector = face_detection.FaceAlignment(face_detection.LandmarksType._2D, 
+															flip_input=False, device='cpu')
+					batch_size = args.face_det_batch_size
+					continue
+				print('Face detection failed with error: {}'.format(e))
+				raise RuntimeError('Face detection failed on GPU. Try --resize_factor for high-resolution inputs.')
+			batch_size = max(batch_size // 2, 1)
+			print('Recovering from error; New batch size: {}'.format(batch_size))
 			continue
 		break
 
 	results = []
 	pady1, pady2, padx1, padx2 = args.pads
-	for rect, image in zip(predictions, images):
+	for rect, image, scale in zip(predictions, images, scales):
 		if rect is None:
-			cv2.imwrite('temp/faulty_frame.jpg', image) # check this frame where the face was not detected.
+			cv2.imwrite('temp/faulty_frame.jpg', image)
 			raise ValueError('Face not detected! Ensure the video contains a face in all the frames.')
 
-		y1 = max(0, rect[1] - pady1)
-		y2 = min(image.shape[0], rect[3] + pady2)
-		x1 = max(0, rect[0] - padx1)
-		x2 = min(image.shape[1], rect[2] + padx2)
+		inv = 1.0 / scale if scale > 0 else 1.0
+		y1 = max(0, int(rect[1] * inv) - pady1)
+		y2 = min(image.shape[0], int(rect[3] * inv) + pady2)
+		x1 = max(0, int(rect[0] * inv) - padx1)
+		x2 = min(image.shape[1], int(rect[2] * inv) + padx2)
 		
 		results.append([x1, y1, x2, y2])
 
